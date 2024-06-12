@@ -55,17 +55,17 @@ Thrift：这个是Facebook开发 的一个软件框架，可以用来跨语言�
 10. Spark SQL 内部实现流程中平台无关部分的基础框架称为 Catalyst。InternalRow 体系用于表示行数据，TreeNode 体系用于表示查询计划的逻辑结构，而Expression 体系则用于表示SQL查询中的各种计算和操作。这三个体系共同构成了Spark SQL中的Catalyst查询引擎的核心组成部分
 
 - lnternalRow 体系：InternalRow 就是用来表示一行行数据的类，InternalRow中都是根据下标来访问和操作列元素的。
-![alt text](image1.png)
-![alt text](image.png)
+![alt text](《SparkSQL内核剖析》pic/image1.png)
+![alt text](《SparkSQL内核剖析》pic/image2.png)
     - GenericlnternalRow 构造参数是 Array[Any]类型，Any是所有类型的超类。用对象数组进行底层存储， genericGet 也是直接根据下标访问的。类型安全是在运行时而不是编译时提供的（Java和C#就是在编译时进行类型检查的语言，而python是运行时检查）。
 
     - GenericlnternalRow 的数组是引用传递的，所以不允许通过set改变，而SpecificInternalRow则是以拷贝的数组传为构造参数传递的，所以允许通过set操作修改。
 
 - TreeNode体系：中间数据结构。是SparkSQL中所有树结构的基类。定义了一个系列通用的集合操作和树遍历操作接口。是一种泛型。并提供最简单基础的操作。
-![alt text](image-1.png)
-![alt text](image-2.png)
+![alt text](《SparkSQL内核剖析》pic/image3.png)
+![alt text](《SparkSQL内核剖析》pic/image4.png)
 - Expression 体系：表达式一般指的是不需要触发执行引擎而能够直接进行计算的单元，例如加减乘除四则运算、逻辑操作、转换操作、过滤操作等。e g：col("name") === "Alice" 或 col("salary") * 1.1,是细粒度。对于算子或查询计划（QueryPlan）指的是对数据集的整体操作，如过滤、连接、聚合等。e g：Filter（过滤算子）、Join（连接算子）、Aggregate（聚合算子），是粗粒度。
-![alt text](image-3.png)
+![alt text](《SparkSQL内核剖析》pic/image5.png)
 
     - 有一些CodegenFallback 接口：不支持代码生成的表达式 某些表达式涉及第三方实现（例如 Hive UDF ）等情况，无法生成 Java 代码，此时通过 CodegenFallback 直接调用eval方法执行，该接口中实现了具体的调用方法。它通过提供一种回退机制（Fallback mechanism，有一些UDF可能不能生成较好的字节码去执行，而使用该表达式的eval方法来直接计算结果）来保证这些表达式的兼容性和可执行性。
 
@@ -74,7 +74,7 @@ Thrift：这个是Facebook开发 的一个软件框架，可以用来跨语言�
 11. Apache Spark 是一个开源的大数据处理框架，Spark 支持多种编程语言，包括 Scala、Java、Python 和 R，Catalyst 是 Apache Spark SQL 的查询优化框架。它负责分析、优化和编译 SQL 查询，Spark 是用 Scala 编写的，而 Scala 本身运行在 Java 虚拟机（JVM）上。
 
 12.平台无关，逻辑计划（Logical Plan）平台无关,属于TreeNode，仍然是抽象类，继承于父类QueryPlan,父类有6个模块输入输出、字符串、规范化、表达式操作、基本属性和约束。
-![alt text](image-4.png)
+![alt text](《SparkSQL内核剖析》pic/image6.png)
 
 - 由SparkSqlParser 中的AstBuilder对语法树的各种Context节点访问，并转换为对应的LogicalPlan节点，然后形成未解析的逻辑运算子树：不包含数据信息和列信息。
 
@@ -103,7 +103,7 @@ Thrift：这个是Facebook开发 的一个软件框架，可以用来跨语言�
 - 对于用户的 SQL 语句，逻辑算子树既要完全涵盖查询与处理中的语义逻辑，又要定义各种体系的数据结构，并将这些数据结构整合在一起；对于后续的物理算子阶段，逻辑算子树需要提供完整的逻辑信息。
 
 13. 物理计划（Physical Plan），平台有关。
-![alt text](image-5.png)
+![alt text](《SparkSQL内核剖析》pic/image7.png)
 
 - 由 SparkPlanner 将各种物理计划策略（Strategy）作用于对应的 LogicalPlan 节点上，生SparkPlan 列表（注: LogicalPlan 可能产生多种 SparkPlan)
 
