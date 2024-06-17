@@ -507,7 +507,88 @@ $$ M=L / 8 / 1024$$
 上面例子中，计算出桶号后，剩下的比特串是：10010110000，从低位到高位看，第一次出现 1 的位置是 5 。也就是说，此时第3个桶，第3轮的试验中，$k_{max}$ = 5。5 对应的二进制是：101，又因为每个桶有 p 个比特位。当 p>=3 时，便可以将 101 存进去。
 模仿上面的流程，多个不同的用户id，就被分散到不同的桶中去了，且每个桶有其 $k_{max}$。然后当要统计出页面有多少用户点击量的时候，就是一次估算。最终结合所有桶中的 $k_{max}$，代入估算公式，便能得出估算值。
 ![alt text](《Doris数仓实战》pic/image-7.png)
-***可视化模拟***
+
+**可视化模拟**
 
 http://content.research.neustar.biz/blog/hll.html
 
+## 16. LSM-Tree
+存储结构可以粗略分为两类：**数据可变**的和**数据不可变**的。所谓可变，就是说已经插入的数据还可以原地进行修改，不可变就是说已经插入的数据就不能再修改了。
+
+B 树是数据可变的代表结构（B+ 树等衍生结构都归为 B 树一族）。B 树的难点在于平衡性维护和并发控制，一般用在读多写少的场景数据存在节点上，我们可以随意插入、删除、修改 BST 中的节点。B 树的理论增删查改性能和 BST 一样都是 logN，但 B 树的实际写入效率并不是特别高，：
+
+一方面是因为 B 树需要分裂合并等操作保证整棵树的平衡性，这里面涉及很多磁盘随机读写的操作，性能会比较差；
+
+另一方面考虑到并发场景，修改 B 树结构时需要比较复杂的锁机制保证并发安全，也会一定程度影响效率。
+
+LSM 树（Log Structured Merge Tree）数据不可变的代表结构。你只能在尾部追加新数据，不能修改之前已经插入的数据。但可以利用墓碑机制实现修改与删除：
+
+我们只需要提供set(key, val)和get(key)两个 API 即可。
+
+查询操作靠get(key)，增删改操作都可以由set(key, val)实现：
+如果set的key不存在就是新增键值对，如果已经存在，就是更新键值对；如果把val设置为一个特殊值（比如 null）就可以代表key被删掉了（墓碑机制）。
+
+那么我对某个键key做了一系列操作后，我只要找到最近一次的操作，就能知道这个键当前的值是多少了。
+
+**磁盘角度**：在尾部追加的写入效率非常高，因为不需要像 B 树那样维护复杂的树形结构。但代价是，查找效率肯定比较低，只能通过线性遍历去查找操作记录；同时会空间放大： LSM 树中，如果更新一个键 100 次，就相当于写入了 100 条数据，会消耗更多空间。解决办法话就是**压实（compact）**，把操作序列中失效的历史操作消除掉，只保留最近的操作记录。
+
+**有序性**：有序度越高，读性能越强，但相应的，维护有序性的成本也越高，写入性能也就会越差。B 树实际上维护了所有数据的有序性，读快写慢。LSM 树不可能向 B 树那样维护所有数据的有序性，但可以维护局部数据的有序性，从而一定程度提升读性能。
+
+**结构**：![alt text](《Doris数仓实战》pic/image-1.png)
+其中Journal就是log，Entry Log就是若干SSTable的集合。memtable是红黑树或者跳表这样的有序内存数据结构，起到缓存和排序的作用，把新写入的数据按照键的大小进行排序。当memtable到达一定大小之后，会被转化成SSTable格式刷入磁盘持久化存储。
+
+SSTable（Sorted String Table）数据按照键的大小排列，你可以把它类比成一个有序数组。而 LSM 树就是若干SSTable的集合。
+
+log文件记录操作日志，在数据写入memtable的同时也会刷盘写入到log文件，作用是数据恢复。类似于Redis中的AOF文件。等memtable中的数据成功转化成SSTable落盘之后，log文件中对应的操作日志就没必要存在了，可以被删除。LSM 树的set写入过程并不复杂：写入log和memtable，最后转化成一个SSTable持久化到磁盘就行了。
+
+**Compact**:比较常用的方案是按照层级组织SSTable:
+![alt text](《Doris数仓实战》pic/image-8.png)
+每个绿色方块代表一个SSTable，若干个SSTable构成一层，总共有若干层，每层能够容纳的SSTable数量上限依次递增。新刷入的SSTable在第 0 层，如果某一层的SSTable个数超过上限，则会触发 compact 操作，从该层选出若干SSTable合并成一个更大的SSTable，移动下一层：
+![alt text](《Doris数仓实战》pic/image-9.png)
+每个SSTable就好比一个有序数组/链表，多个SSTable的合并就是合并多个有序链表的逻辑，所以越靠上层的数据越新，越靠下层的数据越旧，且算法保证同一层的若干SSTable的key不存在重叠。
+
+![alt text](《Doris数仓实战》pic/image-10.png)
+对于查询key27，只需要从上到下遍历层，每层中使用二分查找寻找可能包含key27的SStable，然后使用Boolmfilter快速判断是否存在。这样就避免了使用线性时间查找目标key。
+
+### 17 数据导入
+- **Stream Load**：Doris用户最常用的数据导入方式之一，它是一种同步的导入方式, 允许用户通过Http访问的方式将CSV格式或JSON格式的数据批量地导入Doris，并返回数据导入的结果。用户可以直接通过Http请求的返回体判断数据导入是否成功，也可以通过在客户端执行查询SQL来查询历史任务的结果。
+
+    用户将Stream Load的Http请求提交给FE，FE会通过 Http 重定向（Redirect）将数据导入请求转发给某一个BE节点，该BE节点将作为本次Stream Load任务的Coordinator。在这个过程中，接收请求的FE节点仅仅提供**转发**服务，由作为 Coordinator的BE节点实际负责整个导入作业，比如负责向Master FE发送事务请求、从FE获取导入执行计划、接收实时数据、分发数据到其他Executor BE节点以及数据导入结束后返回结果给用户。
+    
+    用户也可以将Stream Load的Http请求直接提交给某一个指定的BE节点，并由该节点作为本次Stream Load任务的Coordinator。在Stream Load过程中，Executor BE节点负责将数据写入存储层。
+
+
+![alt text](《Doris数仓实战》pic/image-11.png)
+
+Doris通过事务（Transaction）来保证数据导入的原子性，一次Stream Load任务对应一个事务。Stream Load的事务管理由FE负责，FE通过FrontendService接收Coordinator BE节点发送来的Thrift RPC事务请求，事务请求类型包括Begin Transaction、Commit Transaction和Rollback Transaction。Doris的事务状态包括：PREPARE、COMMITTED、VISIBLE和ABORTED。
+![alt text](《Doris数仓实战》pic/image-12.png)
+1. **Begin Transaction（隔离性）**:
+  - **请求**: 数据导入开始时，Coordinator BE向FE发送Begin Transaction请求。
+  - **检查**: FE检查请求的label是否已存在。
+    - 如果不存在，则创建新事务，分配Transaction Id，将事务状态设置为PREPARE，并返回成功信息。
+    - 如果已存在，则视为重复请求，返回失败信息，任务退出。
+
+2. **Commit Transaction（持久性）**:
+  - **请求**: 数据写入磁盘完成后，Coordinator BE向FE发送Commit Transaction请求。
+  - **检查**: FE检查每个Tablet成功写入数据的副本数量是否超过其总数的一半。**多数派原则**（quorum）。
+    - 如果满足条件，Commit Transaction成功，状态设置为COMMITTED，但数据还不可见，需执行Publish Version。
+    - 如果不满足条件，返回失败信息。
+
+3. **Publish Version（一致性）**:
+  - **操作**: FE通过Thrift RPC向所有相关Executor BE节点发出Publish Version请求，各节点异步执行任务。
+  - **状态更新**:
+    - 所有Publish Version任务成功后，事务状态变为VISIBLE。
+    - 任务失败时，FE会重复下发请求直至成功或超时。
+    - 超时后，事务状态为COMMITTED，但数据依然不可见，需用户执行额外命令查看并等待状态变为VISIBLE。
+    - 当出现并发导入时，Doris 会利用 **MVCC** 机制来保证数据的正确性。如果两批数据导入都更新了一个相同 key 的不同列，则其中系统版本较高的导入任务会在版本较低的导入任务成功后，使用版本较低的导入任务写入的相同 key 的数据行重新进行补齐。
+  - **存在意义**：
+    - **数据一致性**，在大型分布式系统中，单独的Commit Transaction仅确保数据写入多数副本，但尚未达成全局一致性。Publish Version通过一个全局同步操作，通知所有节点更新数据版本，确保系统内的所有操作都读取到最新的数据。
+    - **读写分离**，某些系统可能使用读写分离机制，即写操作完成后，数据并不会立即对读操作可见。Publish Version步骤使得新数据从写路径传播到读路径，确保数据对外提供一致的视图。
+    - **处理失败和重试机制**，在分布式系统中某些节点可能在数据写入阶段或之后发生短暂故障。Publish Version步骤提供了重试机制，确保所有节点最终接受并确认新数据版本，避免数据不一致。
+    - **延迟容忍**，Publish Version允许系统在合适的时机（通常是低峰时段或批量处理）执行，减少对实时写入操作的影响，提高系统整体性能和响应速度。
+
+4. **Rollback Transaction（原子性）**:
+  - **请求**: 导入过程中的任一阶段失败时，Coordinator BE向FE发送Rollback Transaction请求。
+  - **回滚**:
+    - FE将事务状态设置为ABORTED，并通过Thrift RPC向Executor BE节点发出Clear Transaction请求，将数据标记为不可用，随后删除这些数据。
+    - 已COMMITTED状态的事务不可回滚。
