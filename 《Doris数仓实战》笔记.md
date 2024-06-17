@@ -288,6 +288,21 @@ Colocation Join 旨在为某些 Join 查询提供本地性优化，来减少数�
 
 ### Anti Join 反连接
 是Semi Join的反逻辑，也是**not in、not exists**的底层实现。
+## 14. 物化视图
+
+在没有物化视图功能之前，用户一般都是使用 Rollup 功能通过预聚合方式提升查询效率的。但是 Rollup 具有一定的局限性，他不能基于明细模型做预聚合。物化视图既支持动态刷新数据，又满足高效查询需求。  
+一个好的物化视图，让多个查询都可以匹配到这张物化视图；在实际的分析查询中，并不会覆盖到所有的维度分析（与Rollup对比）。所以给常用的维度组合创建物化视图即可，从而到达一个空间和时间上的平衡。
+
+例子：
+``` sql
+create materialized view store_amt as select store_id, sum(sale_amt) from sales_records group by store_id;
+```
+
+**创建物化视图是异步的操作——需要检查是否完成。**
+```sql
+SHOW ALTER TABLE MATERIALIZED VIEW FROM db_name
+```
+可以用于计算UV（Unique Visitor）和PV（Page View）。
 
 
 
