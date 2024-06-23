@@ -114,3 +114,67 @@ acks 的默认值即为1，代表我们的消息被leader副本接收之后就�
 
 - 设置 unclean.leader.election.enable = false  
 当 Leader 副本发生故障时就不会从 Follower 副本中和 Leader 同步程度达不到要求的副本中选择出 Leader ，这样降低了消息丢失的可能性。
+
+
+## 如何保证高可用
+Kafka 允许同一个 Partition 存在多个消息副本，每个 Partition 的副本通常由 1 个 Leader 及 0 个以上的 Follower 组成，生产者将消息直接发往对应 Partition 的 Leader，Follower 会周期地向 Leader 发送同步请求
+
+同一 Partition 的 Replica 不应存储在同一个 Broker 上，因为一旦该 Broker 宕机，对应 Partition 的所有 Replica 都无法工作，这就达不到高可用的效果
+
+所以 Kafka 会尽量将所有的 Partition 以及各 Partition 的副本均匀地分配到整个集群的各个 Broker 上
+![alt text](image-4.png)
+### ISR（In-Sync Replicas，同步副本集）
+
+用于确保数据的高可用性和一致性。
+
+在 Kafka 中，每个分区（Partition）都有一个领导者副本（Leader）和若干个副本（Replicas）。这些副本分为同步副本（In-Sync Replicas, ISR）和非同步副本（Out-of-Sync Replicas）。同步副本是指与领导者副本保持同步的副本，非同步副本是指没有与领导者副本保持同步的副本。
+
+这里的保持同步不是指与 Leader 数据保持完全一致，只需在replica.lag.time.max.ms时间内（默认为500ms）与 Leader 保持有效连接。
+
+ISR 机制的工作原理
+- 消息写入：当生产者向 Kafka 发送消息时，消息首先写入到分区的领导者副本。领导者副本将消息复制到 ISR 集合中的所有副本。
+- 副本同步：ISR 集合中的副本会定期从领导者副本拉取消息进行同步。如果某个副本在一定时间内未能从领导者副本拉取到最新的消息，则该副本会被移出 ISR 集合，进入 OSR 集合。
+- 副本失效处理：如果领导者副本失效，Kafka 会从 ISR 集合中选举一个新的领导者副本。由于 ISR 集合中的副本都是同步的，新选举的领导者副本可以保证数据的一致性和高可用性。
+- 副本恢复：如果某个 OSR 副本恢复并且与领导者副本重新同步，它将重新加入 ISR 集合。
+
+
+### Unclean 领导者选举
+
+当 Kafka 中unclean.leader.election.enable配置为 true(默认值为 false)且 ISR 中所有副本均宕机的情况下，才允许 ISR 外的副本被选为 Leader，此时会丢失部分已应答的数据。
+
+开启 Unclean 领导者选举可能会造成数据丢失，但好处是，它使得分区 Leader 副本一直存在，不至于停止对外提供服务，因此提升了高可用性，反之，禁止 Unclean 领导者选举的好处在于维护了数据的一致性，避免了消息丢失，但牺牲了高可用性
+![alt text](image-5.png)
+
+### ACK 机制
+- acks=0
+
+生产者无需等待服务端的任何确认，消息被添加到生产者套接字缓冲区后就视为已发送，因此 acks=0 不能保证服务端已收到消息
+
+- acks=1
+
+只要 Partition Leader 接收到消息而且写入本地磁盘了，就认为成功了，不管它其他的 Follower 有没有同步过去这条消息了
+
+- acks=all
+
+Leader 将等待 ISR 中的所有副本确认后再做出应答，因此只要 ISR 中任何一个副本还存活着，这条应答过的消息就不会丢失。acks=all 是可用性最高的选择，但等待 Follower 应答引入了额外的响应时间。Leader 需要等待 ISR 中所有副本做出应答，此时响应时间取决于 ISR 中最慢的那台机器。
+
+**发送的 acks=1 和 0 消息会出现丢失情况，为不丢失消息可配置生产者acks=all & min.insync.replicas >= 2**
+
+
+
+### 故障恢复机制
+- Broker
+
+首先需要在集群所有 Broker 中选出一个 Controller，负责各 Partition 的 Leader 选举以及 Replica 的重新分配
+.当出现 Leader 故障后，Controller 会将 Leader/Follower 的变动通知到需为此作出响应的 Broker。
+
+Kafka 使用 ZooKeeper 存储 Broker、Topic 等状态数据，Kafka 集群中的 Controller 和 Broker 会在 ZooKeeper 指定节点上注册 Watcher(事件监听器)，以便在特定事件触发时，由 ZooKeeper 将事件通知到对应 Broker
+
+![alt text](image-6.png)
+
+- Controller
+
+集群中的 Controller 也会出现故障，因此 Kafka 让所有 Broker 都在 ZooKeeper 的 Controller 节点上注册一个 Watcher
+Controller 发生故障时对应的 Controller 临时节点会自动删除，此时注册在其上的 Watcher 会被触发，所有活着的 Broker 都会去竞选成为新的 Controller(即创建新的 Controller 节点，由 ZooKeeper 保证只会有一个创建成功)
+竞选成功者即为新的 Controller。
+
