@@ -254,3 +254,23 @@ Producer 向 Broker 发送消息不是一条消息一条消息的发送。Produc
 
 压缩主要是为了降低网络传输的消耗，提高吞吐量。
 
+Producer 发送消息块，先对其进行压缩，Broker 接收到压缩后的消息块之后，会依次将压缩后的消息块写入文件中（注意：这个时候消息块还是压缩的状态），当消息块到达 Consumer  后，Consumer 才会对消息块进行解压缩
+
+### 是不是分区数越多越好呢？
+- 越多的分区需要打开更多的文件句柄
+- 客户端 / 服务器端需要使用的内存就越多
+- 降低高可用性：分区越多，每个 Broker 上分配的分区也就越多，当一个发生 Broker 宕机，那么恢复时间将很长。
+
+### 文件结构
+
+Kafka 消息是以 Topic 为单位进行归类，各个 Topic 之间是彼此独立的，互不影响。每个 Topic 又可以分为一个或多个分区。每个分区各自存在一个记录消息数据的日志文件。
+
+Kafka 每个分区日志在物理上实际按大小被分成多个 Segment。
+
+![alt text](image-14.png)
+
+index 采用稀疏索引，这样每个 index 文件大小有限，Kafka 采用mmap的方式，直接将 index 文件映射到内存，这样对 index 的操作就不需要操作磁盘 IO。mmap的 Java 实现对应 MappedByteBuffer 。
+
+Kafka 充分利用二分法来查找对应 offset 的消息位置：
+
+![alt text](image-15.png)
