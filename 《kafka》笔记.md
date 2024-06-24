@@ -227,4 +227,30 @@ FileChannel.transferTo();
 
 ![alt text](image-10.png)
 
+![alt text](image-12.png)
+
+producer 生产消息到 Broker 时，Broker 会使用 pwrite() 系统调用【对应到 Java NIO 的 FileChannel.write() API】按偏移量写入数据，此时数据都会先写入page cache。consumer 消费消息时，Broker 使用 sendfile() 系统调用【对应 FileChannel.transferTo() API】，零拷贝地将数据从 page cache 传输到 broker 的 Socket buffer，再通过网络传输。
+
+leader 与 follower 之间的同步，与上面 consumer 消费数据的过程是同理的。
+
+page cache中的数据会随着内核中 flusher 线程的调度以及对 sync()/fsync() 的调用写回到磁盘，就算进程崩溃，也不用担心数据丢失。另外，如果 consumer 要消费的消息不在page cache里，才会去磁盘读取，并且会顺便预读出一些相邻的块放入 page cache，以方便下一次读取。
+
+因此如果 Kafka producer 的生产速率与 consumer 的消费速率相差不大，那么就能几乎只靠对 broker page cache 的读写完成整个生产 - 消费过程，磁盘访问非常少。
+
+### 网络模型
+Kafka 自己实现了网络模型做 RPC。底层基于 Java NIO，采用和 Netty 一样的 Reactor 线程模型。
+![alt text](image-13.png)
+
+Kafka 即基于 Reactor 模型实现了多路复用和处理线程池。  
+其中包含了一个Acceptor线程，用于处理新的连接，Acceptor 有 N 个 Processor 线程 select 和 read socket 请求，N 个 Handler 线程处理请求并响应，即处理业务逻辑。使得系统在单线程的情况下可以同时处理多个客户端请求。它的最大优势是系统开销小，并且不需要创建新的进程或者线程，降低了系统的资源开销。
+
+### 批量传输与压缩消息
+
+Producer 向 Broker 发送消息不是一条消息一条消息的发送。Producer 有两个重要的参数：batch.size和linger.ms。  
+
+高并发读和高吞吐写场景下：  
+
+批量传输与压缩消息。批量主要是为了让传输消息的次数变得更少；  
+
+压缩主要是为了降低网络传输的消耗，提高吞吐量。
 
