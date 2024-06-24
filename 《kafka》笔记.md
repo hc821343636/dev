@@ -178,3 +178,53 @@ Kafka 使用 ZooKeeper 存储 Broker、Topic 等状态数据，Kafka 集群中�
 Controller 发生故障时对应的 Controller 临时节点会自动删除，此时注册在其上的 Watcher 会被触发，所有活着的 Broker 都会去竞选成为新的 Controller(即创建新的 Controller 节点，由 ZooKeeper 保证只会有一个创建成功)
 竞选成功者即为新的 Controller。
 
+## kafka为什么这么快？
+高度抽象：网络、磁盘、复杂度问题。  
+高度抽象的解决方案： 并发、压缩、批量、缓存、算法。  
+角色：Producer 、Broker、Consumer这个。
+### 随机写——为什么写磁盘慢？
+![alt text](image-7.png)
+
+完成一次磁盘 IO，需要经过**寻道、旋转和数据传输**三个步骤。
+如果写磁盘时，省略寻道、旋转可以极大提高性能。
+
+- Kafka 采用**顺序写**文件的方式来提高磁盘写入性能。  
+
+Kafka 中每个分区是一个有序的，不可变的消息序列，新的消息不断追加到 Partition 的末尾，在 Kafka 中 Partition 只是一个逻辑概念，Kafka 将 Partition 划分为多个 Segment，每个 Segment 对应一个物理文件，Kafka 对 segment 文件追加写，这就是顺序写文件。
+
+- 为什么 Kafka 可以使用追加写?
+
+说白了，Kafka 就是一个Queue，Queue 是 FIFO 的，数据是有序的。
+
+### 零拷贝Zero-copy
+
+- 传统网络I/O模型：Kafka Consumer 消费存储在 Broker 磁盘的数据，从读取 Broker 磁盘到网络传输给 Consumer   
+![alt text](image-8.png). 
+1. 第一次：读取磁盘文件到操作系统内核缓冲区；
+2. 第二次：将内核缓冲区的数据，copy 到应用程序的 buffer；
+3. 第三步：将应用程序 buffer 中的数据，copy 到 socket 网络发送缓冲区；
+4. 第四次：将 socket buffer 的数据，copy 到网卡，由网卡进行网络传输。
+
+![alt text](image-11.png)
+
+此时存在四个副本，其中两个副本涉及cpu，其中还有四次上下文切换。
+
+**第二步**：用户态到内核态，内核态回到用户态（2次上下文切换）
+**第三步**：用户态到内核态，内核态回到用户态（2次上下文切换）
+
+Kafka 使用到了 mmap 和 sendfile 的方式来实现零拷贝。分别对应 Java 的 MappedByteBuffer 和 FileChannel.transferTo。 
+
+使用java实现零拷贝：  
+``` java
+FileChannel.transferTo();  
+```
+
+![alt text](image-9.png)
+
+上下文切换的数量减少到一个。具体而言，transferTo()方法指示块设备通过 DMA 引擎将数据读取到读取缓冲区中。然后，将该缓冲区复制到另一个内核缓冲区以暂存到套接字。最后，套接字缓冲区通过 DMA 复制到 NIC 缓冲区。
+
+将副本数从四减少到三，并且这些副本中只有一个涉及 CPU。我们还将上下文切换的数量从四个减少到了两个。
+
+![alt text](image-10.png)
+
+
