@@ -36,10 +36,13 @@ Kafka 将生产者发布的消息发送到 Topic（主题） 中，需要这些�
 
 同时，你一定也注意到每个 Broker 中又包含了 Topic 以及 Partition 这两个重要的概念：
 
-● Topic（主题） : Producer 将消息发送到特定的主题，Consumer 通过订阅特定的 Topic(主题) 来消费消息。 
+- Topic（主题） : Producer 将消息发送到特定的主题，Consumer 通过订阅特定的 Topic(主题) 来消费消息。 
 
-● Partition（分区） : Partition 属于 Topic 的一部分。一个 Topic 可以有多个 Partition ，并且同一 Topic 下的 Partition 可以分布在不同的 Broker 上，这也就表明一个 Topic 可以横跨多个 Broker 。
+-  Partition（分区） : Partition 属于 Topic 的一部分。一个 Topic 可以有多个 Partition ，并且同一 Topic 下的 Partition 可以分布在不同的 Broker 上，这也就表明一个 Topic 可以横跨多个 Broker 。
+- 如何保证消息的顺序：
 
+对于消费者:每个消费组内部维护自己的一组消费位置，每个队列对应一个消费位置。消费位置在服务端保存，并且，消费位置和消费者是没有关系的。每个消费位置一般就是一个整数，记录这个消费组中，这个队列消费到哪个位置了，这个位置之前的消息都成功消费了，之后的消息都没有消费或者正在消费。
+对于消息队列：在发送端，使用账户 ID 作为 Key，采用一致性哈希算法计算出队列编号，指定队列来发送消息。一致性哈希算法可以保证，相同 Key 的消息总是发送到同一个队列上，这样可以保证相同 Key 的消息是严格有序的。
 ## Kafka 的多副本机制
  Kafka 为分区（Partition）引入了多副本（Replica）机制。分区（Partition）中的多个副本之间会有一个叫做 leader 的家伙，其他副本称为 follower。我们发送的消息会被发送到 leader 副本，然后 follower 副本才能从 leader 副本中拉取消息进行同步。
 
@@ -309,3 +312,25 @@ Kafka 充分利用二分法来查找对应 offset 的消息位置：
 Kafka 的网络通信模型是基于 NIO 的 Reactor 多线程模型来设计的。其中包含了一个Acceptor线程，用于处理新的连接，Acceptor 有 N 个 Processor 线程 select 和 read socket 请求，N 个 Handler 线程处理请求并响应，即处理业务逻辑。下面就是 KafkaServer 的模型图：
 
 ![alt text](《kafka》pic/image-17.png)
+
+
+### 一些概念
+
+消费指针（Offset）：
+每个消费者在消费消息时只移动消费指针（Offset），记录当前消费到的消息位置。
+消费者组中的每个消费者会独立维护自己的消费指针。指针存储在存储在服务器端。
+
+消息保留（Retention）：
+消息的删除由Kafka主题的保留策略（如保留时间retention.ms和存储大小retention.bytes）决定，而不是由消费者的消费行为决定。
+Kafka会定期根据保留策略清理过期或超出存储限制的消息。
+
+消费不会删除消息：
+消费者读取消息时，只是移动消费指针，并不会删除Kafka中的实际消息。
+消息在达到保留策略规定的条件之前会一直保留在分区中。
+
+重复消费和幂等性：
+消费者可以重复读取同一消息，尤其是在故障重启或重新平衡后。
+应用程序通常需要设计成幂等的，以处理重复消费不会引起副作用。
+
+
+
