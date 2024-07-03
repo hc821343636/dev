@@ -48,6 +48,22 @@ Kafka 将生产者发布的消息发送到 Topic（主题） 中，需要这些�
 
  生产者和消费者只与 leader 副本交互。其他副本只是 leader 副本的拷贝，它们的存在只是为了保证消息存储的安全性。当 leader 副本发生故障时会从 follower 中选举出一个 leader,但是 follower 中如果有和 leader 同步程度达不到要求的参加不了 leader 的竞选。
 
+ 一个实例：
+```
+TopicA
+├── Partition 0
+│   ├── Leader (Broker 1)
+│   ├── Follower (Broker 2)
+│   └── Follower (Broker 3)
+├── Partition 1
+│   ├── Leader (Broker 2)
+│   ├── Follower (Broker 3)
+│   └── Follower (Broker 1)
+└── Partition 2
+    ├── Leader (Broker 3)
+    ├── Follower (Broker 1)
+    └── Follower (Broker 2)
+```
  ## Kafka 的多分区（Partition）以及多副本（Replica）机制有什么好处
  
  1. Kafka 通过给特定 Topic 指定多个 Partition, 而各个 Partition 可以分布在不同的 Broker 上, 这样便能提供比较好的并发能力（负载均衡）。
