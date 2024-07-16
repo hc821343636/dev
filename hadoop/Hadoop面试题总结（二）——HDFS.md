@@ -1,7 +1,8 @@
-## Hadoop面试题总结（二）——HDFS  
-
+## Hadoop面试题总结（二）——HDFS（Hadoop Distributed System）
+### 0、HDFS架构：
+![alt text](pics/Hadoop面试题Pics/HDFS文档-Pics/QQ_1721088520536.png)
 ### 1、 HDFS 中的 block 默认保存几份？  
-&emsp; 默认保存3份  
+&emsp; 默认保存3份 ,储存在不同的服务器上
 
 ### 2、HDFS 默认 BlockSize 是多大？  
 &emsp; 默认64MB  
@@ -10,7 +11,8 @@
 &emsp; DataNode负责数据存储  
 
 ### 4、SecondaryNameNode的目的是什么？  
-&emsp; 他的目的使帮助NameNode合并编辑日志，减少NameNode 启动时间  
+&emsp; 他的目的使帮助NameNode合并编辑日志，减少NameNode 启动时间。它不是NameNode的备份，但可以作为NameNode的备份，当因为断电或服务器损坏的情况，可以用SecondNameNode中已合并的fsimage文件作为备份文件恢复到NameNode上，但是很有可能丢失掉在合并过程中新生成的edits信息。因此不是完全的备份。
+ 由于NameNode仅在启动期间合并fsimage和edits文件，因此在繁忙的群集上，edits日志文件可能会随时间变得非常大。较大编辑文件的另一个副作用是下一次重新启动NameNode需要更长时间。SecondNameNode的主要功能是帮助NameNode合并edits和fsimage文件，从而减少NameNode启动时间。
 
 ### 5、文件大小设置，增大有什么影响？  
 &emsp; HDFS中的文件在物理上是分块存储（block），块的大小可以通过配置参数( dfs.blocksize)来规定，默认大小在hadoop2.x版本中是128M，老版本中是64M。  
@@ -23,7 +25,7 @@
 &emsp; 增加文件块大小，需要增加磁盘的传输速率。  
 
 ### 6、hadoop的块大小，从哪个版本开始是128M  
-&emsp; Hadoop1.x都是64M，hadoop2.x开始都是128M。  
+&emsp; 64MB（hadoop1.x）、128MB（hadoop2.x）、256MB(hadoop3.x)  
 
 ### 7、HDFS的存储机制（☆☆☆☆☆）  
 &emsp; HDFS存储机制，包括HDFS的**写入数据过程**和**读取数据过程**两部分  
