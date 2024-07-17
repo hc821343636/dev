@@ -70,25 +70,19 @@ dn1每传一个packet会放入一个应答队列等待应答。
 **1）第一阶段：NameNode启动**  
 &emsp; （1）第一次启动NameNode格式化后，创建fsimage和edits文件。如果不是第一次启动，直接加载从磁盘中编辑日志edits和镜像文件fsimage到内存。   
 &emsp; （2）客户端对元数据进行增删改。   
-&emsp; （3）NameNode记录操作日志，更新滚动日志（先写磁盘）。   
-&emsp; （4）NameNode在内存中对数据进行增删改查(再写内存)。  
+&emsp; （3）NameNode记录操作日志，更新滚动日志。   
+&emsp; （4）NameNode在内存中对数据进行增删改查。  
 **2）第二阶段：Secondary NameNode工作**  
-&emsp; （1）Secondary NameNode询问NameNode是否需要checkpoint。直接带回NameNode是否检查结果。  
-&emsp; （2）Secondary NameNode请求执行checkpoint。  
-&emsp; （3）NameNode滚动正在写的edits日志。  
-&emsp; （4）将滚动前的编辑日志和镜像文件拷贝到Secondary NameNode。  
-&emsp; （5）Secondary NameNode加载编辑日志和镜像文件到内存，并合并。  
-&emsp; （6）生成新的镜像文件fsimage.chkpoint。  
-&emsp; （7）拷贝fsimage.chkpoint到NameNode。  
-&emsp; （8）NameNode将fsimage.chkpoint重新命名成fsimage。
+&emsp; （1）Secondary NameNode询问NameNode是否需要checkpoint。带回NameNode是否检查结果。  
+&emsp; （2）Secondary NameNode请求执行checkpoint（时间间隔达到1小时或Edits中的事务条数达到1百万）。  
+&emsp; （3）编辑日志edits和镜像文件fsimage拷贝到Secondary NameNode。  
+&emsp; （4）Secondary NameNode加载编辑日志edits和镜像文件fsimage到内存，并合并。  
+&emsp; （5）生成新的镜像文件fsimage.chkpoint和edits.new。  
+&emsp; （6）拷贝fsimage.chkpoint和edits.new到NameNode。  
+&emsp; （7）NameNode将fsimage.chkpoint和edits.new重新命名成fsimage和edit。
 
-### 8、NameNode与SecondaryNameNode 的区别与联系？（☆☆☆☆☆）  
-**机制流程看第7题**  
-1）区别  
-&emsp; （1）NameNode负责管理整个文件系统的元数据，以及每一个路径（文件）所对应的数据块信息。  
-&emsp; （2）SecondaryNameNode主要用于定期合并命名空间镜像和命名空间镜像的编辑日志。  
-2）联系：  
-&emsp; （1）SecondaryNameNode中保存了一份和namenode一致的镜像文件（fsimage）和编辑日志（edits）。  
+### 8、NameNode与SecondaryNameNode ？（☆☆☆☆☆）  
+&emsp; （1）SecondaryNameNode中定期保存了一份和namenode一致的镜像文件（fsimage）和编辑日志（edits）。  
 &emsp; （2）在主namenode发生故障时（假设没有及时备份数据），可以从SecondaryNameNode恢复数据。  
 
 ### 9、HDFS组成架构（☆☆☆☆☆）  

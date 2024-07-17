@@ -1,21 +1,15 @@
 ## Hadoop面试题总结（三）——MapReduce  
 
-### 1、谈谈Hadoop序列化和反序列化及自定义bean对象实现序列化?  
+### 1、谈谈Hadoop序列化和反序列化?  
 1）序列化和反序列化  
 &emsp; （1）序列化就是把内存中的对象，转换成字节序列（或其他数据传输协议）以便于存储（持久化）和网络传输。   
 &emsp; （2）反序列化就是将收到字节序列（或其他数据传输协议）或者是硬盘的持久化数据，转换成内存中的对象。  
 &emsp; （3）Java的序列化是一个重量级序列化框架（Serializable），一个对象被序列化后，会附带很多额外的信息（各种校验信息，header，继承体系等），不便于在网络中高效传输。所以，hadoop自己开发了一套序列化机制（Writable），精简、高效。  
-2）自定义bean对象要想序列化传输步骤及注意事项：  
-&emsp; （1）必须实现Writable接口  
-&emsp; （2）反序列化时，需要反射调用空参构造函数，所以必须有空参构造  
-&emsp; （3）重写序列化方法  
-&emsp; （4）重写反序列化方法  
-&emsp; （5）注意反序列化的顺序和序列化的顺序完全一致  
-&emsp; （6）要想把结果显示在文件中，需要重写toString()，且用"\t"分开，方便后续用  
-&emsp; （7）如果需要将自定义的bean放在key中传输，则还需要实现comparable接口，因为mapreduce框中的shuffle过程一定会对key进行排序  
+
 
 ### 2、FileInputFormat切片机制（☆☆☆☆☆）  
 job提交流程源码详解  
+
 &emsp; waitForCompletion()  
 &emsp; submit();  
 &emsp; // 1、建立连接  
@@ -71,20 +65,22 @@ FileInputFormat源码解析(input.getSplits(job))
 ### 6、MapTask和ReduceTask工作机制（☆☆☆☆☆）（也可回答MapReduce工作原理）
 **MapTask工作机制**
 <p align="center">
-<img src="https://github.com/wangzhiwubigdata/God-Of-BigData/blob/master/%E9%9D%A2%E8%AF%95%E7%B3%BB%E5%88%97/pics/Hadoop%E9%9D%A2%E8%AF%95%E9%A2%98Pics/MR-Pics/MapTask%E5%B7%A5%E4%BD%9C%E6%9C%BA%E5%88%B6.png"/>  
+<img src="pics/Hadoop%E9%9D%A2%E8%AF%95%E9%A2%98Pics/MR-Pics/MapTask%E5%B7%A5%E4%BD%9C%E6%9C%BA%E5%88%B6.png"/>  
 <p align="center">
 </p>
 </p>  
 
-（1）Read阶段：Map Task通过用户编写的RecordReader，从输入InputSplit中解析出一个个key/value。  
+（1）Read阶段：Map Task通过用户编写的RecordReader，从输入InputSplit中解析出一个个key/value。按照/n进行分割，然后以空格分隔单词，key为偏移量，value为字符串。
+
 （2）Map阶段：该节点主要是将解析出的key/value交给用户编写map()函数处理，并产生一系列新的key/value。  
-（3）Collect收集阶段：在用户编写map()函数中，当数据处理完成后，一般会调用OutputCollector.collect()输出结果。在该函数内部，它会将生成的key/value分区（调用Partitioner），并写入一个环形内存缓冲区中。  
-（4）Spill阶段：即“溢写”，当环形缓冲区满后，MapReduce会将数据写到本地磁盘上，生成一个临时文件。需要注意的是，将数据写入本地磁盘之前，先要对数据进行一次本地排序，并在必要时对数据进行合并、压缩等操作。  
-（5）Combine阶段：当所有数据处理完成后，MapTask对所有临时文件进行一次合并，以确保最终只会生成一个数据文件。  
+（3）shuffle阶段：
+- Collect收集阶段：在用户编写map()函数中，当数据处理完成后，一般会调用OutputCollector.collect()输出结果。在该函数内部，它会将生成的key/value分区（调用Partitioner），即将hashCode（key）%reduceSize算出分区，并写入一个环形内存缓冲区（默认为大小为100MB）中。  
+- Spill阶段：即“溢写”，当环形缓冲区满（达到80%）后，MapReduce对数据进行一次本地排序，并在必要时对数据进行合并、压缩，将数写到本地磁盘上，生成一个临时文件。
+- Combine阶段：当所有数据处理完成后，MapTask对所有临时文件进行一次合并，以确保最终只会生成一个数据文件。  
 
 **ReduceTask工作机制**
 <p align="center">
-<img src="https://github.com/wangzhiwubigdata/God-Of-BigData/blob/master/%E9%9D%A2%E8%AF%95%E7%B3%BB%E5%88%97/pics/Hadoop%E9%9D%A2%E8%AF%95%E9%A2%98Pics/MR-Pics/ReduceTask%E5%B7%A5%E4%BD%9C%E6%9C%BA%E5%88%B6.png"/>  
+<img src="pics/Hadoop%E9%9D%A2%E8%AF%95%E9%A2%98Pics/MR-Pics/ReduceTask%E5%B7%A5%E4%BD%9C%E6%9C%BA%E5%88%B6.png"/>  
 <p align="center">
 </p>
 </p>  
@@ -117,9 +113,31 @@ FileInputFormat源码解析(input.getSplits(job))
 &emsp; （2）一个是在reduce side发生在copy后 reduce前。  
 
 ### 8、描述mapReduce中shuffle阶段的工作流程，如何优化shuffle阶段（☆☆☆☆☆）
-<img src="https://github.com/wangzhiwubigdata/God-Of-BigData/blob/master/%E9%9D%A2%E8%AF%95%E7%B3%BB%E5%88%97/pics/Hadoop%E9%9D%A2%E8%AF%95%E9%A2%98Pics/MR-Pics/mapReduce%E4%B8%ADshuffle%E9%98%B6%E6%AE%B5%E7%9A%84%E5%B7%A5%E4%BD%9C%E6%B5%81%E7%A8%8B.png"/>  
+<img src="pics/Hadoop%E9%9D%A2%E8%AF%95%E9%A2%98Pics/MR-Pics/mapReduce%E4%B8%ADshuffle%E9%98%B6%E6%AE%B5%E7%9A%84%E5%B7%A5%E4%BD%9C%E6%B5%81%E7%A8%8B.png"/>  
 
 分区，排序，溢写，拷贝到对应reduce机器上，增加combiner，压缩溢写的文件。  
+- 压缩优化：
+
+输入和输出压缩：在存储和输出数据时使用压缩技术（如 Gzip、Snappy）以减少磁盘 I/O 和网络传输负载。
+中间数据压缩：在 Map 阶段生成的中间数据进行压缩，减少数据传输量。
+- 小文件处理优化:
+
+通过 CombineFileInputFormat 将多个小文件合并为一个逻辑输入，解决输入端大量小文件场景，减少 Map 任务的数量，和NameNode的负载。
+
+定期合并小文件：在数据导入 HDFS 时，定期运行合并小文件的作业
+
+- Map阶段：
+增大环形缓冲区大小（100->200mb）
+
+增大溢写比例（80%->90%）
+
+减少对溢写文件的merge次数。（10个文件，一次20个merge）
+
+不影响实际业务的前提下，采用Combiner提前合并，减少 I/O
+
+- 合理设置Map和Reduce数：
+
+两个都不能设置太少，也不能设置太多。太少，会导致Task等待，延长处理时间；太多，会导致 Map、Reduce任务间竞争资源，造成处理超时等错误。
 
 ### 9、描述mapReduce中combiner的作用是什么，一般使用情景，哪些情况不需要，及和reduce的区别？
 1）Combiner的意义就是对每一个maptask的输出进行局部汇总，以减小网络传输量。  
@@ -128,7 +146,7 @@ FileInputFormat源码解析(input.getSplits(job))
 &emsp; Combiner是在每一个maptask所在的节点运行；  
 &emsp; Reducer是接收全局所有Mapper的输出结果。  
 
-<img src="https://github.com/wangzhiwubigdata/God-Of-BigData/blob/master/%E9%9D%A2%E8%AF%95%E7%B3%BB%E5%88%97/pics/Hadoop%E9%9D%A2%E8%AF%95%E9%A2%98Pics/MR-Pics/mapReduce%E4%B8%ADcombiner%E4%BD%9C%E7%94%A8.png"/>
+<img src="pics/Hadoop%E9%9D%A2%E8%AF%95%E9%A2%98Pics/MR-Pics/mapReduce%E4%B8%ADcombiner%E4%BD%9C%E7%94%A8.png"/>
 
 ### 10、如果没有定义partitioner，那数据在被送达reducer前是如何被分区的？
 &emsp; 如果没有自定义的 partitioning，则默认的 partition 算法，即根据每一条数据的 key 的 hashcode 值摸运算（%）reduce 的数量，得到的数字就是“分区号“。  
