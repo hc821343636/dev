@@ -110,7 +110,18 @@ dn1每传一个packet会放入一个应答队列等待应答。
 &emsp; （2）定期合并Fsimage和Edits，并推送给NameNode；  
 &emsp; （3）在紧急情况下，可辅助恢复NameNode。  
 
-### 10、HAnamenode 是如何工作的? （☆☆☆☆☆）  
+### 10、HAnamenode 是如何工作的? High Availability，HA（☆☆☆☆☆）
+
+
+既然SecondaryNode不能保证NameNode的数据一致性，使用双NameNode：
+- 保证这两个 NameNode 的元数据信息必须要同步的：
+使用共享存储（Shared Storage）：两个 NameNode 共享一个存储目录，例如分布式存储系统QJM - Quorum Journal Manager上，主要用于保存 EditLog，并不保存 FSImage 文件。FSImage文件还是在 NameNode 的本地磁盘上，采用多个节点的JournalNode节点组成的集群来储存editLog，NameNode除了向本地磁盘写入EditLog以外，还会并行的向集群中每一个JournalNode发送写请求，如果有2N+1台JournalNode，只要大多数（n）台返回写入成功即可。
+
+- 一个NameNode 挂掉之后另一个要立马补上。
+
+防止脑裂：尝试调用旧 Active NameNode 的 HAServiceProtocol RPC 接口
+的 transitionToStandby 方法，看能不能把它转换为 Standby 状态；  
+如果失败就第二个nn发送kill 强行关闭旧NameNode。
 <p align="center">
 <img src="pics/Hadoop%E9%9D%A2%E8%AF%95%E9%A2%98Pics/HAnamenode%E5%B7%A5%E4%BD%9C%E6%9C%BA%E5%88%B6.png"/>  
 <p align="center">

@@ -67,18 +67,10 @@ public void reduce(Text key, Iterator<Text> values,
 &emsp; &emsp; &emsp; 使用Combine可以大量地减小数据频率倾斜和数据大小倾斜。在可能的情况下，combine的目的就是聚合并精简数据。  
 
 ### 3、HDFS小文件优化方法（☆☆☆☆☆）  
-1）HDFS小文件弊端：  
-&emsp; HDFS上每个文件都要在namenode上建立一个索引，这个索引的大小约为150byte，这样当小文件比较多的时候，就会产生很多的索引文件，一方面会大量占用namenode的内存空间，另一方面就是索引文件过大是的索引速度变慢。   
-2）解决的方式：   
-&emsp; （1）Hadoop本身提供了一些文件压缩的方案。 
-&emsp; （2）从系统层面改变现有HDFS存在的问题，其实主要还是小文件的合并，然后建立比较快速的索引。  
-3）Hadoop自带小文件解决方案  
-&emsp; （1）Hadoop Archive：  
-&emsp; &emsp; 是一个高效地将小文件放入HDFS块中的文件存档工具，它能够将多个小文件打包成一个HAR文件，这样在减少namenode内存使用的同时。   
-&emsp; （2）Sequence file：  
-&emsp; &emsp; sequence file由一系列的二进制key/value组成，如果为key小文件名，value为文件内容，则可以将大批小文件合并成一个大文件。   
-&emsp; （3）CombineFileInputFormat：  
-&emsp; &emsp; CombineFileInputFormat是一种新的inputformat，用于将多个文件合并成一个单独的split，另外，它会考虑数据的存储位置。  
+HDFS小文件弊端：  
+&emsp; HDFS上每个文件都要在namenode上建立一个索引，大小约为150byte，这样当小文件比较多的时候，一方面会大量占用namenode的内存空间，另一方面就是索引文件过大是的索引速度变慢。   
+解决的方式： CombineFileInputFormat：  
+&emsp;  CombineFileInputFormat是一种新的inputformat，用于将多个文件合并成一个单独的split，另外，它会考虑数据的存储位置。  
 
 
 

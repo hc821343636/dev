@@ -6,37 +6,6 @@
 &emsp; （2）反序列化就是将收到字节序列（或其他数据传输协议）或者是硬盘的持久化数据，转换成内存中的对象。  
 &emsp; （3）Java的序列化是一个重量级序列化框架（Serializable），一个对象被序列化后，会附带很多额外的信息（各种校验信息，header，继承体系等），不便于在网络中高效传输。所以，hadoop自己开发了一套序列化机制（Writable），精简、高效。  
 
-
-### 2、FileInputFormat切片机制（☆☆☆☆☆）  
-job提交流程源码详解  
-
-&emsp; waitForCompletion()  
-&emsp; submit();  
-&emsp; // 1、建立连接  
-&emsp; &emsp; connect();   
-&emsp; &emsp; &emsp; // 1）创建提交job的代理  
-&emsp; &emsp; &emsp; new Cluster(getConfiguration());  
-&emsp; &emsp; &emsp; &emsp; // （1）判断是本地yarn还是远程  
-&emsp; &emsp; &emsp; &emsp; initialize(jobTrackAddr, conf);  
-&emsp; // 2、提交job  
-&emsp; submitter.submitJobInternal(Job.this, cluster)  
-&emsp; &emsp; // 1）创建给集群提交数据的Stag路径  
-&emsp; &emsp; Path jobStagingArea = JobSubmissionFiles.getStagingDir(cluster, conf);  
-&emsp; &emsp; // 2）获取jobid ，并创建job路径  
-&emsp; &emsp; JobID jobId = submitClient.getNewJobID();  
-&emsp; &emsp; // 3）拷贝jar包到集群  
-&emsp; &emsp; copyAndConfigureFiles(job, submitJobDir);  
-&emsp; &emsp; rUploader.uploadFiles(job, jobSubmitDir);  
-&emsp; &emsp; // 4）计算切片，生成切片规划文件  
-&emsp; &emsp; writeSplits(job, submitJobDir);  
-&emsp; &emsp; maps = writeNewSplits(job, jobSubmitDir);  
-&emsp; &emsp; input.getSplits(job);  
-&emsp; &emsp; // 5）向Stag路径写xml配置文件  
-&emsp; &emsp; writeConf(conf, submitJobFile);  
-&emsp; &emsp; conf.writeXml(out);  
-&emsp; &emsp; // 6）提交job,返回提交状态  
-&emsp; &emsp; status = submitClient.submitJob(jobId, submitJobDir.toString(), job.getCredentials());  
-
 ### 3、在一个运行的Hadoop 任务中，什么是InputSplit？（☆☆☆☆☆）
 FileInputFormat源码解析(input.getSplits(job))  
 （1）找到你数据存储的目录。  
@@ -53,6 +22,7 @@ FileInputFormat源码解析(input.getSplits(job))
 （4）**提交切片规划文件到yarn上，yarn上的MrAppMaster就可以根据切片规划文件计算开启maptask个数**。  
 
 ### 4、如何判定一个job的map和reduce的数量?
+在 Hadoop 中，每个 Map 或 Reduce 任务也是一个独立的 JVM 进程。
 1）map数量  
 &emsp; splitSize=max{minSize,min{maxSize,blockSize}}  
 &emsp; map数量由处理的数据分成的block数量决定default_num = total_size / split_size;  
@@ -74,8 +44,8 @@ FileInputFormat源码解析(input.getSplits(job))
 
 （2）Map阶段：该节点主要是将解析出的key/value交给用户编写map()函数处理，并产生一系列新的key/value。  
 （3）shuffle阶段：
-- Collect收集阶段：在用户编写map()函数中，当数据处理完成后，一般会调用OutputCollector.collect()输出结果。在该函数内部，它会将生成的key/value分区（调用Partitioner），即将hashCode（key）%reduceSize算出分区，并写入一个环形内存缓冲区（默认为大小为100MB）中。  
-- Spill阶段：即“溢写”，当环形缓冲区满（达到80%）后，MapReduce对数据进行一次本地排序，并在必要时对数据进行合并、压缩，将数写到本地磁盘上，生成一个临时文件。
+- Collect收集阶段：在用户编写map()函数后，它会将生成的key/value分区（调用Partitioner），即将hashCode（key）%reduceSize算出分区，并写入一个环形内存缓冲区（默认为大小为100MB）中。（为了减少磁盘I/O）  
+- Spill阶段：即“溢写”，当环形缓冲区满（达到80%）后，MapReduce对数据进行一次排序，并在必要时对数据进行合并、压缩，将数写到本地磁盘上，生成一个临时文件。
 - Combine阶段：当所有数据处理完成后，MapTask对所有临时文件进行一次合并，以确保最终只会生成一个数据文件。  
 
 **ReduceTask工作机制**
@@ -85,8 +55,8 @@ FileInputFormat源码解析(input.getSplits(job))
 </p>
 </p>  
 
-（1）Copy阶段：ReduceTask从各个MapTask上远程拷贝一片数据，并针对某一片数据，如果其大小超过一定阈值，则写到磁盘上，否则直接放到内存中。  
-（2）Merge阶段：在远程拷贝数据的同时，ReduceTask启动了两个后台线程对内存和磁盘上的文件进行合并，以防止内存使用过多或磁盘上文件过多。  
+（1）Copy阶段：ReduceTask通过HTTP 方式请求从各个MapTask上远程拷贝一片数据，并针对某一片数据，如果其大小超过一定阈值，则写到磁盘上，否则直接放到内存中。  
+（2）Merge阶段：在远程拷贝数据的同时，ReduceTask启动了两个后台线程对内存和磁盘上的文件进行合并，以防止内存使用过多或磁盘上文件过多。 merge有三种形式：内存到内存（默认不使用）；内存到磁盘；磁盘到磁盘。如果内存达到一定阈值，就启动内存到磁盘，最后全部写入以后再执行一次磁盘到磁盘。
 （3）Sort阶段：按照MapReduce语义，用户编写reduce()函数输入数据是按key进行聚集的一组数据。为了将key相同的数据聚在一起，Hadoop采用了基于排序的策略。 由于各个MapTask已经实现对自己的处理结果进行了局部排序，因此，ReduceTask只需对所有数据进行一次归并排序即可。  
 （4）Reduce阶段：reduce()函数将计算结果写到HDFS上。  
 
