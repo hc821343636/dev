@@ -61,34 +61,37 @@ FileInputFormat源码解析(input.getSplits(job))
 （4）Reduce阶段：reduce()函数将计算结果写到HDFS上。  
 
 ### 7、描述mapReduce有几种排序及排序发生的阶段（☆☆☆☆☆）
-1）排序的分类：  
-&emsp; （1）部分排序：  
+1）排序的分类：  部分排序：  
 &emsp; &emsp; MapReduce根据输入记录的键对数据集排序。保证输出的每个文件内部排序。  
-&emsp; （2）全排序：  
-&emsp; &emsp; 如何用Hadoop产生一个全局排序的文件？最简单的方法是使用一个分区。但该方法在处理大型文件时效率极低，因为一台机器必须处理所有输出文件，从而完全丧失了MapReduce所提供的并行架构。  
-&emsp; &emsp; 替代方案：首先创建一系列排好序的文件；其次，串联这些文件；最后，生成一个全局排序的文件。主要思路是使用一个分区来描述输出的全局排序。例如：可以为待分析文件创建3个分区，在第一分区中，记录的单词首字母a-g，第二分区记录单词首字母h-n, 第三分区记录单词首字母o-z。  
-&emsp; （3）辅助排序：（GroupingComparator分组）  
-&emsp; &emsp; Mapreduce框架在记录到达reducer之前按键对记录排序，但键所对应的值并没有被排序。甚至在不同的执行轮次中，这些值的排序也不固定，因为它们来自不同的map任务且这些map任务在不同轮次中完成时间各不相同。一般来说，大多数MapReduce程序会避免让reduce函数依赖于值的排序。但是，有时也需要通过特定的方法对键进行排序和分组等以实现对值的排序。  
-&emsp; （4）二次排序：  
-&emsp; &emsp; 在自定义排序过程中，如果compareTo中的判断条件为两个即为二次排序。  
-2）自定义排序WritableComparable  
-&emsp; bean对象实现WritableComparable接口重写compareTo方法，就可以实现排序  
-&emsp; &emsp; @Override  
-&emsp; &emsp; public int compareTo(FlowBean o) {  
-&emsp; &emsp; &emsp; // 倒序排列，从大到小  
-&emsp; &emsp; &emsp; return this.sumFlow > o.getSumFlow() ? -1 : 1;  
-&emsp; &emsp; }  
-3）排序发生的阶段：  
+2）排序发生的阶段：  
 &emsp; （1）一个是在map side发生在spill后partition前。  
 &emsp; （2）一个是在reduce side发生在copy后 reduce前。  
 
 ### 8、描述mapReduce中shuffle阶段的工作流程，如何优化shuffle阶段（☆☆☆☆☆）
 <img src="pics/Hadoop%E9%9D%A2%E8%AF%95%E9%A2%98Pics/MR-Pics/mapReduce%E4%B8%ADshuffle%E9%98%B6%E6%AE%B5%E7%9A%84%E5%B7%A5%E4%BD%9C%E6%B5%81%E7%A8%8B.png"/>  
+阶段：
+1. Collect阶段：将 MapTask 的结果输出到默认大小为 100M 的环形缓冲区，
+保存的是 key/value，Partition 分区信息等。
 
-分区，排序，溢写，拷贝到对应reduce机器上，增加combiner，压缩溢写的文件。  
+2. Spill 阶段：当内存中的数据量达到一定的阀值的时候，就会将数据写入本
+地磁盘，在将数据写入磁盘之前需要对数据进行一次排序的操作，如果配
+置了 combiner，还会将有相同分区号和 key 的数据进行排序。
+
+3. MapTask 阶段的 Merge：把所有溢出的临时文件进行一次合并操作，以确
+保一个 MapTask 最终只产生一个中间数据文件。
+
+4. Copy 阶段：ReduceTask 启动 Fetcher 线程到已经完成 MapTask 的节点上
+复制一份属于自己的数据，这些数据默认会保存在内存的缓冲区中，当内存的缓冲区达到一定的阀值的时候，就会将数据写到磁盘之上。
+
+5. ReduceTask 阶段的 Merge：在 ReduceTask 远程复制数据的同时，会在后
+台开启两个线程对内存到本地的数据文件进行合并操作。
+
+6. Sort 阶段：在对数据进行合并的同时，会进行排序操作，由于 MapTask 阶
+段已经对数据进行了局部的排序，ReduceTask 只需保证 Copy 的数据的最终整体有效性即可。
+
+优化思路：分区，排序，溢写，拷贝到对应reduce机器上，增加combiner，压缩溢写的文件。  
 - 压缩优化：
-
-输入和输出压缩：在存储和输出数据时使用压缩技术（如 Gzip、Snappy）以减少磁盘 I/O 和网络传输负载。
+输入和输出压缩：在存储和输出数据时使用压缩技术（如Snappy）以减少磁盘 I/O 和网络传输负载。
 中间数据压缩：在 Map 阶段生成的中间数据进行压缩，减少数据传输量。
 - 小文件处理优化:
 
@@ -97,7 +100,7 @@ FileInputFormat源码解析(input.getSplits(job))
 定期合并小文件：在数据导入 HDFS 时，定期运行合并小文件的作业
 
 - Map阶段：
-增大环形缓冲区大小（100->200mb）
+增大环形缓冲区大小（100->200mb）mapreduce.task.io.sort.mb
 
 增大溢写比例（80%->90%）
 
